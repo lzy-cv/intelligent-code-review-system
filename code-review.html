@@ -1,0 +1,942 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>智能代码审查 · AI Code Review</title>
+
+<!-- 字体：无衬线标题 + 等宽代码 -->
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+
+<!-- Tailwind CSS -->
+<script src="https://cdn.tailwindcss.com"></script>
+<!-- Chart.js -->
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
+
+<style>
+  /* ============ 设计变量（豆包浅色风） ============ */
+  :root{
+    --bg:#f5f6f8;            /* 页面底色 */
+    --surface:#ffffff;       /* 卡片 */
+    --border:#e7e9ee;        /* 描边 */
+    --text:#1a1d24;          /* 主文字 */
+    --text-2:#5b6472;        /* 次级文字 */
+    --text-3:#9aa1ad;        /* 弱文字 */
+    --brand:#2f6bff;         /* 豆包蓝 */
+    --brand-deep:#1f54e0;    /* hover */
+    --brand-soft:#eef3ff;    /* 浅蓝底 */
+    --brand2:#22c55e;        /* logo 渐变绿 */
+    --high:#ef4444;  --high-soft:#fee2e2;
+    --mid:#f59e0b;   --mid-soft:#fef3c7;
+    --low:#3b82f6;   --low-soft:#dbeafe;
+    --shadow-sm:0 1px 2px rgba(16,24,40,.04);
+    --shadow-md:0 6px 24px rgba(16,24,40,.08);
+    --shadow-lg:0 16px 48px rgba(16,24,40,.12);
+  }
+
+  *{ box-sizing:border-box; }
+  html,body{ height:100%; }
+  body{
+    margin:0;
+    background:var(--bg);
+    color:var(--text);
+    font-family:'Inter','PingFang SC','Microsoft YaHei',system-ui,-apple-system,sans-serif;
+    -webkit-font-smoothing:antialiased;
+  }
+  .mono{ font-family:'JetBrains Mono',ui-monospace,'SF Mono',Consolas,monospace; }
+
+  /* 网格背景 + 渐变光晕（subtle） */
+  .bg-deco{
+    position:fixed; inset:0; pointer-events:none; z-index:0;
+    background-image:
+      linear-gradient(rgba(47,107,255,.035) 1px,transparent 1px),
+      linear-gradient(90deg,rgba(47,107,255,.035) 1px,transparent 1px);
+    background-size:40px 40px;
+    -webkit-mask-image:radial-gradient(ellipse 80% 60% at 50% 0%,#000 30%,transparent 70%);
+            mask-image:radial-gradient(ellipse 80% 60% at 50% 0%,#000 30%,transparent 70%);
+  }
+  .glow{
+    position:fixed; z-index:0; pointer-events:none; border-radius:50%; filter:blur(90px); opacity:.5;
+  }
+  .glow-1{ width:480px;height:480px; left:-160px; top:-120px; background:radial-gradient(circle,#2f6bff33,transparent 70%); }
+  .glow-2{ width:420px;height:420px; right:-120px; top:120px; background:radial-gradient(circle,#22c55e26,transparent 70%); }
+
+  /* ============ 侧边栏 ============ */
+  .sidebar{
+    position:fixed; left:0; top:0; bottom:0; width:236px; z-index:20;
+    background:var(--surface); border-right:1px solid var(--border);
+    display:flex; flex-direction:column; padding:20px 14px;
+  }
+  .logo-badge{
+    width:34px;height:34px;border-radius:10px;flex:none;
+    background:linear-gradient(135deg,var(--brand),var(--brand2));
+    display:flex;align-items:center;justify-content:center;color:#fff;
+    box-shadow:0 4px 12px rgba(47,107,255,.35);
+  }
+  .nav-item{
+    display:flex;align-items:center;gap:11px;padding:10px 12px;border-radius:10px;
+    color:var(--text-2);font-size:14px;font-weight:500;cursor:pointer;
+    transition:background .18s,color .18s; user-select:none;
+  }
+  .nav-item:hover{ background:#f2f4f7; color:var(--text); }
+  .nav-item.active{ background:var(--brand-soft); color:var(--brand); font-weight:600; }
+  .nav-item .ico{ width:18px;height:18px;flex:none; }
+
+  /* ============ 卡片 ============ */
+  .card{
+    background:var(--surface); border:1px solid var(--border); border-radius:16px;
+    box-shadow:var(--shadow-sm);
+    transition:transform .22s ease, box-shadow .22s ease;
+  }
+  .card-hover:hover{ transform:translateY(-3px); box-shadow:var(--shadow-lg); }
+
+  /* ============ 按钮 ============ */
+  .btn-primary{
+    display:inline-flex;align-items:center;justify-content:center;gap:8px;
+    background:linear-gradient(135deg,var(--brand),#3b82f6);
+    color:#fff;font-weight:600;font-size:15px;border:none;border-radius:12px;
+    padding:12px 22px;cursor:pointer;box-shadow:0 6px 18px rgba(47,107,255,.35);
+    transition:transform .15s,box-shadow .2s,filter .2s;
+  }
+  .btn-primary:hover:not(:disabled){ transform:translateY(-1px); box-shadow:0 10px 26px rgba(47,107,255,.45); filter:brightness(1.03);}
+  .btn-primary:active:not(:disabled){ transform:translateY(0); }
+  .btn-primary:disabled{ opacity:.6; cursor:not-allowed; }
+  .btn-ghost{
+    display:inline-flex;align-items:center;justify-content:center;gap:7px;
+    background:var(--surface);color:var(--text-2);font-weight:600;font-size:14px;
+    border:1px solid var(--border);border-radius:11px;padding:10px 16px;cursor:pointer;
+    transition:background .18s,color .18s,border-color .18s;
+  }
+  .btn-ghost:hover{ background:#f2f4f7; color:var(--text); border-color:#d7dbe2; }
+
+  /* ============ 输入控件 ============ */
+  .input,.select{
+    width:100%;background:#fff;border:1px solid var(--border);border-radius:11px;
+    padding:11px 14px;font-size:14px;color:var(--text);outline:none;
+    transition:border-color .18s, box-shadow .18s;
+  }
+  .input:focus,.select:focus{ border-color:var(--brand); box-shadow:0 0 0 3px rgba(47,107,255,.14); }
+  .input::placeholder{ color:var(--text-3); }
+  .select{ appearance:none; cursor:pointer;
+    background-image:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='16' height='16' fill='none' stroke='%239aa1ad' stroke-width='2'%3E%3Cpath d='M4 6l4 4 4-4'/%3E%3C/svg%3E");
+    background-repeat:no-repeat;background-position:right 12px center;padding-right:36px;
+  }
+
+  /* ============ 模式切换 tab ============ */
+  .mode-tab{
+    flex:1;display:flex;align-items:center;justify-content:center;gap:7px;
+    padding:11px 10px;border-radius:11px;font-size:14px;font-weight:500;color:var(--text-2);
+    cursor:pointer;border:1px solid transparent;transition:all .18s; user-select:none;
+  }
+  .mode-tab:hover{ background:#f2f4f7; }
+  .mode-tab.active{ background:var(--brand-soft); color:var(--brand); font-weight:600; border-color:#d5e1ff; }
+
+  /* 代码文本域 */
+  .code-input{
+    font-family:'JetBrains Mono',ui-monospace,monospace; font-size:13px; line-height:1.65;
+    resize:vertical; min-height:230px;
+  }
+
+  /* ============ 风险标签 ============ */
+  .risk-badge{
+    display:inline-flex;align-items:center;gap:5px;font-size:12px;font-weight:600;
+    padding:3px 10px;border-radius:999px;white-space:nowrap;
+  }
+  .risk-badge .dot{ width:6px;height:6px;border-radius:50%; }
+  .risk-high{ background:var(--high-soft); color:#dc2626; } .risk-high .dot{ background:var(--high); }
+  .risk-mid { background:var(--mid-soft);  color:#d97706; } .risk-mid  .dot{ background:var(--mid); }
+  .risk-low { background:var(--low-soft);  color:#2563eb; } .risk-low  .dot{ background:var(--low); }
+
+  /* ============ 统计卡片 ============ */
+  .stat-card{ position:relative; overflow:hidden; }
+  .stat-card::after{
+    content:''; position:absolute; right:-20px; top:-20px; width:90px;height:90px;border-radius:50%;
+    background:radial-gradient(circle,var(--accent,var(--brand))22,transparent 70%); opacity:.5;
+  }
+
+  /* ============ 代码预览 ============ */
+  .code-scroll{ overflow:auto; max-height:520px; background:#fbfcfd; }
+  .code-row{ display:flex; min-width:max-content; }
+  .code-row .gutter{
+    width:46px; flex:none; text-align:right; padding:2px 12px 2px 0; user-select:none;
+    color:var(--text-3); font-size:12px; line-height:1.7; font-family:'JetBrains Mono',monospace;
+    border-right:1px solid #eef0f3; background:#fbfcfd; position:sticky; left:0;
+  }
+  .code-row pre{ margin:0; padding:2px 16px; line-height:1.7; font-size:13px; color:#24292f; font-family:'JetBrains Mono',monospace; }
+  .code-row.problem{ background:linear-gradient(90deg,#fff1f2,transparent 65%); }
+  .code-row.problem .gutter{ background:#fff1f2; color:var(--high); font-weight:600; }
+  .code-row.flash{ animation:flashLine 1.4s ease; }
+  @keyframes flashLine{ 0%,60%{ background:#ffe4e6; } 100%{ background:linear-gradient(90deg,#fff1f2,transparent 65%); } }
+  .problem-marker{ position:sticky; left:0; display:flex; align-items:center; }
+
+  /* 语法高亮 token */
+  .tok-comment{ color:#9aa1ad; font-style:italic; }
+  .tok-keyword{ color:#a626a4; }
+  .tok-string { color:#16a34a; }
+  .tok-number { color:#c2410c; }
+  .tok-builtin{ color:#2563eb; }
+  .tok-func   { color:#1d4ed8; }
+
+  /* ============ 缺陷项 ============ */
+  .defect-item{ border:1px solid var(--border); border-radius:14px; overflow:hidden; transition:box-shadow .2s,border-color .2s; background:#fff; }
+  .defect-item:hover{ box-shadow:var(--shadow-md); }
+  .defect-item.open{ border-color:#d5e1ff; box-shadow:var(--shadow-md); }
+  .defect-head{ cursor:pointer; user-select:none; }
+  .defect-fix{ background:#f8fafc; border-top:1px solid var(--border); }
+  .defect-fix pre{ margin:0; padding:10px 12px; font-size:12px; line-height:1.6; overflow:auto; border-radius:8px; background:#0f172a; color:#e2e8f0; }
+
+  /* ============ 动画 ============ */
+  @keyframes fadeIn{ from{opacity:0;} to{opacity:1;} }
+  @keyframes fadeInUp{ from{opacity:0; transform:translateY(14px);} to{opacity:1; transform:translateY(0);} }
+  @keyframes ripple{ 0%{ transform:scale(.5); opacity:.6; } 100%{ transform:scale(2.2); opacity:0; } }
+  @keyframes spin{ to{ transform:rotate(360deg); } }
+  @keyframes blink{ 0%,100%{opacity:1;} 50%{opacity:0;} }
+  @keyframes pulseDot{ 0%,100%{box-shadow:0 0 0 0 rgba(34,197,94,.5);} 50%{box-shadow:0 0 0 6px rgba(34,197,94,0);} }
+  @keyframes shimmer{ 0%{ background-position:-200% 0; } 100%{ background-position:200% 0; } }
+
+  .animate-fadeIn{ animation:fadeIn .5s ease both; }
+  .animate-fadeInUp{ animation:fadeInUp .5s ease both; }
+  .stagger>*{ opacity:0; animation:fadeInUp .5s ease forwards; }
+  .stagger>*:nth-child(1){ animation-delay:.05s; }
+  .stagger>*:nth-child(2){ animation-delay:.12s; }
+  .stagger>*:nth-child(3){ animation-delay:.19s; }
+  .stagger>*:nth-child(4){ animation-delay:.26s; }
+  .stagger>*:nth-child(5){ animation-delay:.33s; }
+
+  .caret{ display:inline-block; width:2px; height:1em; background:var(--brand); margin-left:2px; vertical-align:-2px; animation:blink .9s infinite; }
+  .spinner{ width:16px;height:16px;border:2px solid rgba(255,255,255,.4); border-top-color:#fff; border-radius:50%; animation:spin .7s linear infinite; }
+  .ripple-ring{ position:absolute; inset:0; border-radius:50%; border:2px solid var(--brand); animation:ripple 1.6s ease-out infinite; }
+  .progress-fill{ background:linear-gradient(90deg,var(--brand),#3b82f6,#8b5cf6); background-size:200% 100%; animation:shimmer 2.2s linear infinite; transition:width .12s ease; }
+  .status-dot{ width:8px;height:8px;border-radius:50%; background:var(--brand2); animation:pulseDot 1.8s infinite; }
+
+  /* 滚动条 */
+  .code-scroll::-webkit-scrollbar{ height:10px;width:10px; }
+  .code-scroll::-webkit-scrollbar-thumb{ background:#d7dbe2; border-radius:6px; }
+  .code-scroll::-webkit-scrollbar-thumb:hover{ background:#c2c8d2; }
+
+  .hidden{ display:none !important; }
+</style>
+</head>
+
+<body>
+<div class="bg-deco"></div>
+<div class="glow glow-1"></div>
+<div class="glow glow-2"></div>
+
+<!-- ============ 左侧边栏 ============ -->
+<aside class="sidebar">
+  <div class="flex items-center gap-3 px-1.5 mb-6">
+    <div class="logo-badge">
+      <svg width="20" height="20" viewBox="0 0 24 24" fill="none"><path d="M12 2c3 3 3 6 3 9a3 3 0 1 1-6 0c0-3 0-6 3-9Z" fill="currentColor"/><path d="M12 2c-3 3-3 6-3 9a3 3 0 1 0 6 0c0-3 0-6-3-9Z" fill="currentColor" opacity=".55"/></svg>
+    </div>
+    <div>
+      <div class="text-[15px] font-bold leading-tight">智能代码审查</div>
+      <div class="text-[11px]" style="color:var(--text-3)">AI Code Review</div>
+    </div>
+  </div>
+
+  <button class="btn-primary w-full mb-4" onclick="resetReview()">
+    <svg class="ico" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 5v14M5 12h14"/></svg>
+    新建审查
+  </button>
+
+  <nav class="space-y-1">
+    <div class="nav-item active"><svg class="ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M11 4a4 4 0 1 0 0 8 4 4 0 0 0 0-8Zm-7 16a7 7 0 0 1 14 0"/></svg>审查工作台</div>
+    <div class="nav-item"><svg class="ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 5h18M3 12h18M3 19h18"/></svg>审查历史</div>
+    <div class="nav-item"><svg class="ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V7Z"/></svg>项目管理</div>
+    <div class="nav-item"><svg class="ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8Z"/><path d="M14 2v6h6"/></svg>报告中心</div>
+    <div class="nav-item"><svg class="ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="3"/><path d="M19 12a7 7 0 0 0-.1-1.2l2-1.6-2-3.4-2.4 1a7 7 0 0 0-2-1.2L14 3h-4l-.5 2.6a7 7 0 0 0-2 1.2l-2.4-1-2 3.4 2 1.6A7 7 0 0 0 5 12c0 .4 0 .8.1 1.2l-2 1.6 2 3.4 2.4-1c.6.5 1.3.9 2 1.2L10 21h4l.5-2.6c.7-.3 1.4-.7 2-1.2l2.4 1 2-3.4-2-1.6c.1-.4.1-.8.1-1.2Z"/></svg>设置</div>
+  </nav>
+
+  <div class="mt-auto pt-4 border-t" style="border-color:var(--border)">
+    <div class="flex items-center gap-3 px-1.5">
+      <div class="w-9 h-9 rounded-full flex items-center justify-center text-white text-sm font-bold" style="background:linear-gradient(135deg,#8b5cf6,#ec4899)">Y</div>
+      <div class="min-w-0">
+        <div class="text-sm font-semibold truncate">开发者</div>
+        <div class="text-[11px] truncate" style="color:var(--text-3)">毕业设计 · 免费版</div>
+      </div>
+    </div>
+  </div>
+</aside>
+
+<!-- ============ 主内容区 ============ -->
+<main class="relative z-10" style="margin-left:236px; min-height:100vh;">
+  <div class="max-w-5xl mx-auto px-8 py-8">
+
+    <!-- 顶部栏 -->
+    <div class="flex items-center justify-between mb-6 animate-fadeIn">
+      <div class="flex items-center gap-3">
+        <h1 class="text-xl font-bold">审查工作台</h1>
+        <span class="text-[12px] px-2.5 py-1 rounded-full font-medium" style="background:var(--brand-soft); color:var(--brand)">P0 核心功能</span>
+      </div>
+      <div class="flex items-center gap-2 text-[13px] font-medium" style="color:var(--text-2)">
+        <span class="status-dot"></span> 引擎在线 · 已就绪
+      </div>
+    </div>
+
+    <!-- 简介卡片 -->
+    <section id="introSection" class="card card-hover p-6 mb-5 animate-fadeInUp">
+      <div class="flex items-start gap-4">
+        <div class="w-11 h-11 rounded-xl flex items-center justify-center flex-none" style="background:linear-gradient(135deg,var(--brand),var(--brand2)); color:#fff">
+          <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 2v4M12 18v4M2 12h4M18 12h4"/><circle cx="12" cy="12" r="7"/></svg>
+        </div>
+        <div>
+          <h2 class="font-bold text-[16px] mb-1.5">关于本系统</h2>
+          <p class="text-[14px] leading-relaxed" style="color:var(--text-2)">
+            本系统结合 <b style="color:var(--text)">LLM 大模型</b> + <b style="color:var(--text)">规则引擎(Semgrep)</b> 进行代码深度审查，搭配 <b style="color:var(--text)">RAG 检索相似缺陷案例</b>，通过 <b style="color:var(--text)">Function Calling</b> 调用本地代码解析器，自动生成代码缺陷报告。
+          </p>
+          <div class="flex flex-wrap gap-2 mt-3">
+            <span class="text-[11px] px-2.5 py-1 rounded-full font-medium" style="background:#eef7f1;color:#15803d">LLM 大模型</span>
+            <span class="text-[11px] px-2.5 py-1 rounded-full font-medium" style="background:#eef3ff;color:var(--brand)">Semgrep 规则引擎</span>
+            <span class="text-[11px] px-2.5 py-1 rounded-full font-medium" style="background:#f5f3ff;color:#7c3aed">RAG 检索</span>
+            <span class="text-[11px] px-2.5 py-1 rounded-full font-medium" style="background:#fff7ed;color:#c2410c">Function Calling</span>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- 输入卡片 -->
+    <section id="inputSection" class="card p-6 animate-fadeInUp" style="animation-delay:.08s">
+      <!-- 模式切换 -->
+      <div class="flex gap-2 p-1.5 rounded-xl mb-5" style="background:#f2f4f7">
+        <div class="mode-tab active" data-mode="snippet" onclick="switchMode('snippet')">
+          <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="m8 6-6 6 6 6M16 6l6 6-6 6"/></svg>
+          代码片段粘贴
+        </div>
+        <div class="mode-tab" data-mode="file" onclick="switchMode('file')">
+          <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 3v12M7 10l5 5 5-5"/><path d="M4 21h16"/></svg>
+          文件上传
+        </div>
+        <div class="mode-tab" data-mode="git" onclick="switchMode('git')">
+          <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="6" cy="6" r="2"/><circle cx="18" cy="18" r="2"/><circle cx="18" cy="6" r="2"/><circle cx="6" cy="18" r="2"/><path d="M6 8v8M8 6h8M18 8v8M8 18h8"/></svg>
+          Git 仓库地址
+        </div>
+      </div>
+
+      <!-- 内容区（随模式切换） -->
+      <div id="contentArea" class="mb-5">
+        <!-- 片段 -->
+        <div id="panel-snippet">
+          <textarea id="codeText" class="input code-input" spellcheck="false"></textarea>
+        </div>
+        <!-- 文件 -->
+        <div id="panel-file" class="hidden">
+          <div id="dropzone" class="rounded-xl border-2 border-dashed p-10 text-center cursor-pointer transition-all" style="border-color:var(--border)" onclick="document.getElementById('fileInput').click()">
+            <div class="mx-auto mb-3 w-12 h-12 rounded-xl flex items-center justify-center" style="background:var(--brand-soft);color:var(--brand)">
+              <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 16V4M7 9l5-5 5 5"/><path d="M4 20h16"/></svg>
+            </div>
+            <div id="dropzoneText" class="text-[14px] font-medium">点击或拖拽上传单个代码文件</div>
+            <div class="text-[12px] mt-1" style="color:var(--text-3)">支持 .js / .ts / .py / .java / .go 等文本文件</div>
+            <input type="file" id="fileInput" class="hidden" onchange="handleFile(event)">
+          </div>
+        </div>
+        <!-- Git -->
+        <div id="panel-git" class="hidden">
+          <div class="relative">
+            <span class="absolute left-3.5 top-1/2 -translate-y-1/2" style="color:var(--text-3)">
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="6" cy="6" r="2"/><circle cx="18" cy="18" r="2"/><circle cx="18" cy="6" r="2"/><circle cx="6" cy="18" r="2"/><path d="M6 8v8M8 6h8M18 8v8M8 18h8"/></svg>
+            </span>
+            <input id="gitUrl" class="input mono" style="padding-left:38px" placeholder="https://github.com/user/repo.git">
+          </div>
+          <div class="text-[12px] mt-2" style="color:var(--text-3)">演示环境将模拟拉取仓库 master 分支的最新代码</div>
+        </div>
+      </div>
+
+      <!-- 配置行 -->
+      <div class="grid grid-cols-2 gap-4 mb-6" style="max-width:520px">
+        <div>
+          <label class="block text-[13px] font-semibold mb-1.5" style="color:var(--text-2)">编程语言</label>
+          <select id="langSelect" class="select" onchange="onLangChange()">
+            <option value="javascript">JavaScript</option>
+            <option value="typescript">TypeScript</option>
+            <option value="python">Python</option>
+            <option value="java">Java</option>
+            <option value="go">Go</option>
+            <option value="php">PHP</option>
+          </select>
+        </div>
+        <div>
+          <label class="block text-[13px] font-semibold mb-1.5" style="color:var(--text-2)">风险等级筛选</label>
+          <select id="riskSelect" class="select" onchange="applyRiskFilter()">
+            <option value="all">全部等级</option>
+            <option value="high">仅高危</option>
+            <option value="mid">仅中危</option>
+            <option value="low">仅低危</option>
+          </select>
+        </div>
+      </div>
+
+      <div class="flex items-center gap-3">
+        <button id="startBtn" class="btn-primary" onclick="startReview()">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M13 2 3 14h7l-1 8 10-12h-7l1-8Z"/></svg>
+          开始审查
+        </button>
+        <span class="text-[12px]" style="color:var(--text-3)">预计耗时 3~5 秒 · 异步流水线</span>
+      </div>
+    </section>
+
+    <!-- 扫描状态 -->
+    <section id="scanSection" class="hidden card p-8 mt-5 animate-fadeInUp">
+      <div class="flex items-center gap-6">
+        <div class="relative w-20 h-20 flex-none">
+          <div class="ripple-ring"></div>
+          <div class="ripple-ring" style="animation-delay:.5s"></div>
+          <div class="ripple-ring" style="animation-delay:1s"></div>
+          <div class="absolute inset-0 rounded-full flex items-center justify-center" style="background:linear-gradient(135deg,var(--brand),#3b82f6); color:#fff">
+            <svg width="30" height="30" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M13 2 3 14h7l-1 8 10-12h-7l1-8Z"/></svg>
+          </div>
+        </div>
+        <div class="flex-1 min-w-0">
+          <div class="flex items-center justify-between mb-2">
+            <div class="text-[15px] font-bold">AI 深度审查中</div>
+            <div id="progressPercent" class="text-[13px] font-bold mono" style="color:var(--brand)">0%</div>
+          </div>
+          <div class="h-2.5 rounded-full overflow-hidden" style="background:#eef0f3">
+            <div id="progressBar" class="progress-fill h-full rounded-full" style="width:0%"></div>
+          </div>
+          <div class="mt-3 text-[13px]" style="color:var(--text-2)">
+            <span id="statusText"></span><span class="caret"></span>
+          </div>
+        </div>
+      </div>
+
+      <!-- 扫描日志 -->
+      <div id="scanLog" class="mt-6 p-4 rounded-xl mono text-[12px] leading-relaxed space-y-1.5" style="background:#0f172a;color:#94a3b8; max-height:180px; overflow:auto;"></div>
+    </section>
+
+    <!-- 结果面板 -->
+    <section id="resultSection" class="hidden mt-5">
+
+      <!-- 结果工具条 -->
+      <div class="flex items-center justify-between mb-4 animate-fadeInUp">
+        <div class="flex items-center gap-3">
+          <div class="w-9 h-9 rounded-full flex items-center justify-center" style="background:#eef7f1; color:#16a34a">
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4"><path d="M20 6 9 17l-5-5"/></svg>
+          </div>
+          <div>
+            <div class="text-[15px] font-bold">审查完成</div>
+            <div class="text-[12px]" style="color:var(--text-3)">双引擎融合 · 共检出 <span id="resTotal" class="font-semibold" style="color:var(--text)">0</span> 处缺陷</div>
+          </div>
+        </div>
+        <div class="flex gap-2.5">
+          <button class="btn-ghost" onclick="exportReport('markdown')">
+            <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 3v12M7 10l5 5 5-5"/><path d="M4 21h16"/></svg>
+            导出 Markdown
+          </button>
+          <button class="btn-ghost" onclick="exportReport('html')">
+            <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 3v12M7 10l5 5 5-5"/><path d="M4 21h16"/></svg>
+            导出 HTML 报告
+          </button>
+          <button class="btn-primary" style="padding:10px 16px;font-size:14px" onclick="resetReview()">重新审查</button>
+        </div>
+      </div>
+
+      <!-- 统计卡片 -->
+      <div id="statCards" class="grid grid-cols-4 gap-4 mb-5 stagger"></div>
+
+      <!-- 图表 -->
+      <div class="grid grid-cols-2 gap-5 mb-5">
+        <div class="card card-hover p-5 animate-fadeInUp">
+          <div class="text-[14px] font-bold mb-4">风险等级分布</div>
+          <div class="relative h-[210px] flex items-center justify-center">
+            <canvas id="donutChart"></canvas>
+            <div class="absolute inset-0 flex flex-col items-center justify-center pointer-events-none">
+              <div id="donutTotal" class="text-[30px] font-extrabold">0</div>
+              <div class="text-[12px]" style="color:var(--text-3)">缺陷总数</div>
+            </div>
+          </div>
+        </div>
+        <div class="card card-hover p-5 animate-fadeInUp" style="animation-delay:.08s">
+          <div class="text-[14px] font-bold mb-4">缺陷类型分布</div>
+          <div class="h-[210px]">
+            <canvas id="barChart"></canvas>
+          </div>
+        </div>
+      </div>
+
+      <!-- 缺陷列表 + 代码预览 -->
+      <div class="grid grid-cols-2 gap-5">
+        <!-- 缺陷列表 -->
+        <div class="card animate-fadeInUp" style="animation-delay:.12s">
+          <div class="flex items-center justify-between px-5 py-4 border-b" style="border-color:var(--border)">
+            <div class="text-[14px] font-bold">缺陷列表</div>
+            <span id="defectCount" class="text-[12px] font-medium px-2.5 py-1 rounded-full" style="background:var(--brand-soft);color:var(--brand)">0 项</span>
+          </div>
+          <div id="defectList" class="p-4 space-y-3" style="max-height:560px; overflow:auto;"></div>
+        </div>
+
+        <!-- 代码预览 -->
+        <div class="card animate-fadeInUp" style="animation-delay:.18s">
+          <div class="flex items-center justify-between px-5 py-3.5 border-b" style="border-color:var(--border)">
+            <div class="flex items-center gap-2.5">
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="color:var(--brand)"><path d="M8 6 2 12l6 6M16 6l6 6-6 6"/></svg>
+              <span id="codeFile" class="mono text-[13px] font-medium">user-service.js</span>
+              <span id="codeLang" class="text-[11px] px-2 py-0.5 rounded-full font-medium" style="background:#f2f4f7;color:var(--text-2)">JavaScript</span>
+            </div>
+            <div class="flex items-center gap-2 text-[11px]" style="color:var(--text-3)">
+              <span class="w-3 h-3 rounded-sm inline-block" style="background:#fff1f2;border:1px solid #fecdd3"></span> 问题行
+            </div>
+          </div>
+          <div id="codePreview" class="code-scroll"></div>
+        </div>
+      </div>
+    </section>
+
+    <!-- 页脚 -->
+    <footer class="text-center text-[12px] py-8" style="color:var(--text-3)">智能代码审查平台 · 毕业设计演示 · 纯前端静态模拟</footer>
+  </div>
+</main>
+
+<!-- 示例代码（纯文本，避免转义问题） -->
+<script type="text/plain" id="sample-js">
+// user-service.js — 用户登录与查询模块
+const db = require('./db');
+const API_KEY = "sk-9f8e7d6c5b4a3f2e1d0c9b8a7f6e5d4c";
+
+async function login(req, res) {
+  const { username, password } = req.body;
+  const query = `SELECT * FROM users WHERE name = '${username}' AND pass = '${password}'`;
+  const user = await db.query(query);
+  if (user) {
+    res.cookie('session', user.id, { httpOnly: false });
+    res.send(eval("('" + username + "')"));
+  }
+  return res.json({ ok: true, data: user });
+}
+
+function renderProfile(html) {
+  document.getElementById('profile').innerHTML = html;
+}
+
+function calcDiscount(price) {
+  var total = price * 0.9;
+  console.log("discount applied");
+  return total;
+}
+</script>
+
+<script type="text/plain" id="sample-py">
+# app.py — 用户登录与订单查询接口
+import os
+import sqlite3
+
+API_KEY = "sk-8f7e6d5c4b3a2f1e0d9c8b7a6f5e4d3c"
+
+def login(username, password):
+    conn = sqlite3.connect("users.db")
+    query = "SELECT * FROM users WHERE name = '" + username + "' AND pass = '" + password + "'"
+    cur = conn.execute(query)
+    user = cur.fetchone()
+    if user:
+        token = os.urandom(8).hex()
+        return {"ok": True, "token": token, "data": user}
+    return {"ok": False}
+
+def render(html):
+    return "<div>" + html + "</div>"
+
+def calc(price):
+    total = price * 0.9
+    print("discount", total)
+    return total
+</script>
+
+<script>
+/* ================= 数据 ================= */
+const JS_DEFECTS = [
+  { line:3, level:'high', cat:'安全', title:'硬编码 API 密钥', desc:'检测到明文写入的密钥常量 API_KEY，属于敏感信息泄露。密钥一旦进入代码仓库即视为泄露，可被用于未授权调用下游服务。', fix:'将密钥迁移到环境变量或密钥管理服务（KMS/Vault），通过 process.env 读取，并立即轮换已泄露的密钥。', code:'const API_KEY = process.env.API_KEY;' },
+  { line:7, level:'high', cat:'安全', title:'SQL 注入风险', desc:'SQL 语句通过字符串拼接用户输入构造，攻击者可注入恶意 SQL（如 \' OR \'1\'=\'1\'--）绕过认证或拖库。', fix:'使用参数化查询 / 预编译语句，彻底杜绝字符串拼接。', code:"const query = 'SELECT * FROM users WHERE name = ? AND pass = ?';\nawait db.query(query, [username, password]);" },
+  { line:11, level:'high', cat:'安全', title:'eval() 危险函数调用', desc:'eval 会执行由用户输入拼接出的字符串，等价于远程代码执行（RCE），是最危险的反模式之一。', fix:'删除 eval，改用 JSON.parse 或安全的序列化方式处理数据。', code:'res.send(JSON.parse(JSON.stringify(username)));' },
+  { line:17, level:'high', cat:'安全', title:'XSS 跨站脚本攻击', desc:'innerHTML 直接注入未转义的 html 参数，攻击者可通过构造恶意标签窃取 Cookie、执行任意脚本。', fix:'改用 textContent 赋值，或对内容做转义 / 白名单过滤后再渲染。', code:'el.textContent = html;' },
+  { line:6, level:'mid', cat:'健壮性', title:'用户输入未校验', desc:'username / password 直接解构使用，未做类型、长度、非空校验，异常输入可能导致下游错误或逻辑绕过。', fix:'对入参做类型 / 长度 / 非空校验，必要时引入 schema 校验库（如 zod）。', code:'' },
+  { line:8, level:'mid', cat:'健壮性', title:'数据库查询缺少错误处理', desc:'await db.query 未做 try/catch，连接失败或查询异常会直接抛出，导致接口崩溃。', fix:'包裹 try/catch，统一错误响应并记录日志。', code:'try {\n  const user = await db.query(query, params);\n} catch (err) {\n  console.error(err);\n}' },
+  { line:10, level:'mid', cat:'安全', title:'Cookie 安全属性缺失', desc:'httpOnly 设为 false 使 JS 可读取会话 Cookie，一旦发生 XSS 即可被窃取会话。', fix:'开启 httpOnly 与 SameSite，生产环境同时开启 Secure。', code:"res.cookie('session', user.id, { httpOnly: true, sameSite: 'lax', secure: true });" },
+  { line:21, level:'low', cat:'代码质量', title:'使用 var 声明变量', desc:'var 存在变量提升与函数级作用域问题，易引发意外覆盖与闭包 bug。', fix:'改用 let / const 声明。', code:'const total = price * 0.9;' },
+  { line:22, level:'low', cat:'代码质量', title:'遗留调试日志', desc:'console.log 调试信息遗留在生产代码中，可能泄露内部数据并影响性能。', fix:'移除或改用统一日志框架并控制日志级别。', code:'' },
+];
+
+const PY_DEFECTS = [
+  { line:5, level:'high', cat:'安全', title:'硬编码 API 密钥', desc:'明文写入的密钥常量 API_KEY，属于敏感信息泄露，一旦进入代码仓库即视为泄露。', fix:'通过环境变量或密钥管理服务读取，并立即轮换已泄露密钥。', code:'import os\nAPI_KEY = os.environ["API_KEY"]' },
+  { line:9, level:'high', cat:'安全', title:'SQL 注入风险', desc:'SQL 语句通过字符串拼接用户输入构造，攻击者可注入恶意 SQL 绕过认证或拖库。', fix:'使用参数化查询，禁止字符串拼接 SQL。', code:'query = "SELECT * FROM users WHERE name = ? AND pass = ?"\ncur = conn.execute(query, (username, password))' },
+  { line:8, level:'mid', cat:'健壮性', title:'数据库连接缺少上下文管理', desc:'直接 connect 未使用 with 也未 try/finally，异常时连接无法释放，易耗尽连接池。', fix:'使用 with 上下文管理器或 try/finally 确保连接关闭。', code:'with sqlite3.connect("users.db") as conn:\n    cur = conn.execute(query)' },
+  { line:13, level:'mid', cat:'安全', title:'会话令牌熵不足', desc:'os.urandom(8).hex() 仅产生 64 位熵的令牌，且为弱随机，存在被预测 / 枚举的风险。', fix:'使用 secrets 模块生成更高熵的安全令牌。', code:'import secrets\ntoken = secrets.token_hex(32)' },
+  { line:18, level:'mid', cat:'安全', title:'XSS 跨站脚本攻击', desc:'html 参数未做转义直接拼接返回，攻击者可注入恶意标签窃取数据或执行脚本。', fix:'对输出进行 HTML 转义，或使用模板引擎的自动转义能力。', code:'import html as h\ndef render(html):\n    return "<div>" + h.escape(html) + "</div>"' },
+  { line:14, level:'low', cat:'安全', title:'敏感数据直接返回', desc:'将 user 完整记录返回给客户端，可能泄露密码哈希等敏感字段。', fix:'显式挑选需要返回的字段，过滤敏感信息。', code:'return {"ok": True, "token": token, "data": {"id": user[0]}}' },
+  { line:21, level:'low', cat:'代码质量', title:'变量命名不规范', desc:'变量命名过于简短（calc / total），缺少类型标注，可读性与可维护性差。', fix:'使用有意义的命名并补充类型标注。', code:'def calc_discount(price: float) -> float:' },
+  { line:22, level:'low', cat:'代码质量', title:'遗留调试输出', desc:'print 调试信息遗留在生产代码中，可能泄露内部数据并影响性能。', fix:'移除或改用 logging 模块并控制日志级别。', code:'' },
+];
+
+/* ================= 状态 ================= */
+const state = { mode:'snippet', lang:'javascript', risk:'all', fileName:'', fileCode:null, sample:null, defects:null };
+
+function readSample(id){ return document.getElementById(id).textContent.trim(); }
+
+function getSample(lang){
+  if (lang === 'python')   return { code:readSample('sample-py'), file:'app.py', label:'Python', defects:PY_DEFECTS };
+  if (lang === 'typescript') return { code:readSample('sample-js'), file:'user-service.ts', label:'TypeScript', defects:JS_DEFECTS };
+  return { code:readSample('sample-js'), file:'user-service.js', label:'JavaScript', defects:JS_DEFECTS };
+}
+
+/* ================= 模式切换 ================= */
+function switchMode(mode){
+  state.mode = mode;
+  document.querySelectorAll('.mode-tab').forEach(t => t.classList.toggle('active', t.dataset.mode === mode));
+  ['snippet','file','git'].forEach(k => document.getElementById('panel-'+k).classList.toggle('hidden', k !== mode));
+}
+
+/* ================= 语言切换 ================= */
+function onLangChange(){
+  state.lang = document.getElementById('langSelect').value;
+  state.sample = getSample(state.lang);
+  if (state.mode === 'snippet' && state.fileCode === null){
+    document.getElementById('codeText').value = state.sample.code;
+  }
+}
+
+/* ================= 文件上传 ================= */
+function handleFile(e){
+  const f = e.target.files[0];
+  if (!f) return;
+  state.fileName = f.name;
+  document.getElementById('dropzoneText').innerHTML = '已选择：<b style="color:var(--text)">' + f.name + '</b>';
+  const reader = new FileReader();
+  reader.onload = () => { state.fileCode = reader.result; };
+  reader.readAsText(f);
+}
+
+/* ================= 开始审查 ================= */
+function startReview(){
+  const btn = document.getElementById('startBtn');
+  let code = null;
+
+  if (state.mode === 'snippet'){
+    code = document.getElementById('codeText').value.trim();
+    if (!code){ toast('请先粘贴需要审查的代码', 'warn'); shake(document.getElementById('panel-snippet')); return; }
+  } else if (state.mode === 'file'){
+    if (!state.fileCode){ toast('未选择文件，已使用示例代码演示', 'info'); code = getSample(state.lang).code; }
+    else code = state.fileCode;
+  } else if (state.mode === 'git'){
+    const url = document.getElementById('gitUrl').value.trim();
+    if (!url){ toast('请先输入 Git 仓库地址', 'warn'); shake(document.getElementById('panel-git')); return; }
+    toast('已模拟拉取仓库 master 分支代码', 'info');
+    code = getSample(state.lang).code;
+  }
+
+  // 确定审查数据
+  state.sample = getSample(state.lang);
+  if (state.mode === 'file' && state.fileCode){ /* 用上传的代码，但缺陷数据沿用语言样本 */ }
+  state.defects = state.sample.defects;
+  state.risk = document.getElementById('riskSelect').value;
+
+  // 切换界面
+  btn.disabled = true;
+  btn.innerHTML = '<span class="spinner"></span> 审查中…';
+  document.getElementById('introSection').classList.add('hidden');
+  document.getElementById('inputSection').classList.add('hidden');
+  document.getElementById('scanSection').classList.remove('hidden');
+  document.getElementById('resultSection').classList.add('hidden');
+
+  runScan(code);
+}
+
+/* ================= 扫描动画 ================= */
+const SCAN_STEPS = [
+  { at:0,  text:'正在解析代码结构（tree-sitter AST）…', log:'› 初始化审查引擎，解析 AST 语法树…' },
+  { at:16, text:'运行 Semgrep 规则引擎扫描…',           log:'› Semgrep 命中规则：sqli · hardcoded-secret · xss · eval…' },
+  { at:38, text:'RAG 检索相似缺陷案例…',                 log:'› 向量检索命中 3 条相似 CWE 案例…' },
+  { at:60, text:'LLM 大模型深度分析中…',                 log:'› Function Calling：get_ast_context / search_similar_cases…' },
+  { at:82, text:'融合结果、生成缺陷报告…',               log:'› 合并规则 + LLM 结果，去重分级，生成报告…' },
+];
+
+function runScan(code){
+  const bar = document.getElementById('progressBar');
+  const pct = document.getElementById('progressPercent');
+  const status = document.getElementById('statusText');
+  const log = document.getElementById('scanLog');
+  log.innerHTML = '<div style="color:#64748b">$ 启动审查流水线…</div>';
+
+  let progress = 0, stepIdx = 0;
+  const timer = setInterval(() => {
+    progress += Math.random()*1.2 + 0.4;
+    if (progress > 100) progress = 100;
+    bar.style.width = progress + '%';
+    pct.textContent = Math.floor(progress) + '%';
+
+    const next = SCAN_STEPS[stepIdx];
+    if (next && progress >= next.at){
+      stepIdx++;
+      typeWriter(status, next.text, 24);
+      appendLog(log, next.log);
+    }
+    if (progress >= 100){
+      clearInterval(timer);
+      setTimeout(() => { finishScan(code); }, 420);
+    }
+  }, 38);
+}
+
+function typeWriter(el, text, speed){
+  el.textContent = '';
+  let i = 0;
+  const t = setInterval(() => {
+    i++;
+    el.textContent = text.slice(0, i);
+    if (i >= text.length) clearInterval(t);
+  }, speed);
+}
+
+function appendLog(log, line){
+  const div = document.createElement('div');
+  div.textContent = line;
+  div.style.opacity = '0';
+  log.appendChild(div);
+  requestAnimationFrame(() => { div.style.transition = 'opacity .4s'; div.style.opacity = '1'; });
+  log.scrollTop = log.scrollHeight;
+}
+
+/* ================= 结果渲染 ================= */
+let donutChart = null, barChart = null;
+
+function finishScan(code){
+  document.getElementById('scanSection').classList.add('hidden');
+  const sec = document.getElementById('resultSection');
+  sec.classList.remove('hidden');
+
+  // 统计卡片
+  const defs = state.defects;
+  const counts = { high:defs.filter(d=>d.level==='high').length, mid:defs.filter(d=>d.level==='mid').length, low:defs.filter(d=>d.level==='low').length };
+  const total = defs.length;
+  const statCfg = [
+    { label:'问题总数', value:total, accent:'var(--brand)',   icon:'M13 2 3 14h7l-1 8 10-12h-7l1-8Z' },
+    { label:'高危缺陷', value:counts.high, accent:'var(--high)', icon:'M12 9v4M12 17h.01M10 3h4l7 7-9 9-9-9 7-7Z' },
+    { label:'中危缺陷', value:counts.mid,  accent:'var(--mid)',  icon:'M12 9v4M12 17h.01M10 3h4l7 7-9 9-9-9 7-7Z' },
+    { label:'低危缺陷', value:counts.low,  accent:'var(--low)',  icon:'M12 9v4M12 17h.01M10 3h4l7 7-9 9-9-9 7-7Z' },
+  ];
+  document.getElementById('statCards').innerHTML = statCfg.map((s,i) => `
+    <div class="card card-hover stat-card p-4" style="--accent:${s.accent}">
+      <div class="flex items-center justify-between mb-3">
+        <span class="text-[13px] font-medium" style="color:var(--text-2)">${s.label}</span>
+        <span class="w-8 h-8 rounded-lg flex items-center justify-center" style="background:${s.accent}1a; color:${s.accent}">
+          <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="${s.icon}"/></svg>
+        </span>
+      </div>
+      <div class="text-[30px] font-extrabold leading-none" style="color:${s.accent}">${s.value}</div>
+    </div>`).join('');
+
+  document.getElementById('resTotal').textContent = total;
+  document.getElementById('donutTotal').textContent = total;
+  document.getElementById('codeFile').textContent = (state.mode === 'file' && state.fileName) ? state.fileName : state.sample.file;
+  document.getElementById('codeLang').textContent = state.sample.label;
+
+  drawCharts(counts);
+  renderDefects();
+  renderCode(code);
+  applyRiskFilter();
+
+  sec.scrollIntoView({ behavior:'smooth', block:'start' });
+}
+
+/* ================= 图表 ================= */
+function drawCharts(counts){
+  const cats = ['安全','健壮性','代码质量'];
+  const catCounts = cats.map(c => state.defects.filter(d => d.cat === c).length);
+
+  if (donutChart) donutChart.destroy();
+  donutChart = new Chart(document.getElementById('donutChart'), {
+    type:'doughnut',
+    data:{ labels:['高危','中危','低危'],
+      datasets:[{ data:[counts.high, counts.mid, counts.low],
+        backgroundColor:['#ef4444','#f59e0b','#3b82f6'],
+        borderWidth:0, hoverOffset:8 }] },
+    options:{ cutout:'70%', responsive:true, maintainAspectRatio:false,
+      plugins:{ legend:{ position:'bottom', labels:{ usePointStyle:true, pointStyle:'circle', padding:16, font:{size:12, family:'Inter'} } } } }
+  });
+
+  if (barChart) barChart.destroy();
+  barChart = new Chart(document.getElementById('barChart'), {
+    type:'bar',
+    data:{ labels:cats, datasets:[{ data:catCounts, backgroundColor:'#2f6bff',
+      borderRadius:8, barThickness:34, maxBarThickness:44 }] },
+    options:{ responsive:true, maintainAspectRatio:false,
+      plugins:{ legend:{ display:false } },
+      scales:{ y:{ beginAtZero:true, ticks:{ precision:0, font:{size:11} }, grid:{ color:'#f0f2f5' } },
+               x:{ grid:{ display:false }, ticks:{ font:{size:12} } } } }
+  });
+}
+
+/* ================= 缺陷列表 ================= */
+function renderDefects(){
+  const wrap = document.getElementById('defectList');
+  const lvText = { high:'高危', mid:'中危', low:'低危' };
+  wrap.innerHTML = state.defects.map((d,i) => `
+    <div class="defect-item" data-level="${d.level}" data-line="${d.line}">
+      <div class="defect-head px-4 py-3.5" onclick="toggleDefect(this)">
+        <div class="flex items-center gap-2.5">
+          <span class="risk-badge risk-${d.level}"><span class="dot"></span>${lvText[d.level]}</span>
+          <span class="text-[14px] font-semibold flex-1 truncate">${d.title}</span>
+          <span class="text-[11px] px-2 py-0.5 rounded-full" style="background:#f2f4f7;color:var(--text-2)">${d.cat}</span>
+          <button class="text-[12px] font-medium px-2.5 py-1 rounded-lg shrink-0" style="color:var(--brand);background:var(--brand-soft)"
+            onclick="event.stopPropagation(); locateLine(${d.line})">第 ${d.line} 行</button>
+          <svg class="chevron transition-transform duration-200" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="color:var(--text-3)"><path d="m6 9 6 6 6-6"/></svg>
+        </div>
+      </div>
+      <div class="defect-body hidden px-4 pb-4">
+        <p class="text-[13px] leading-relaxed mb-3" style="color:var(--text-2)">${d.desc}</p>
+        <div class="defect-fix rounded-xl p-3.5">
+          <div class="flex items-center gap-2 mb-2 text-[12px] font-bold" style="color:#16a34a">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M20 6 9 17l-5-5"/></svg>
+            修复建议
+          </div>
+          <p class="text-[13px] leading-relaxed" style="color:var(--text-2)">${d.fix}</p>
+          ${d.code ? `<pre class="mono mt-3">${escapeHtml(d.code)}</pre>` : ''}
+        </div>
+      </div>
+    </div>`).join('');
+  document.getElementById('defectCount').textContent = state.defects.length + ' 项';
+}
+
+function toggleDefect(head){
+  const item = head.closest('.defect-item');
+  const body = item.querySelector('.defect-body');
+  const chevron = item.querySelector('.chevron');
+  item.classList.toggle('open');
+  body.classList.toggle('hidden');
+  chevron.style.transform = body.classList.contains('hidden') ? '' : 'rotate(180deg)';
+}
+
+/* ================= 代码预览（高亮 + 问题行） ================= */
+function escapeHtml(s){ return s.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;'); }
+
+function highlightLine(line){
+  let esc = escapeHtml(line);
+  const kw = 'const|let|var|function|return|if|else|for|while|async|await|new|class|import|from|export|default|try|catch|throw|typeof|instanceof|this|switch|case|break|continue|delete|void|yield|extends|super|null|undefined|true|false|in|of|def|print|not|and|or|elif';
+  const bi = 'console|document|window|Math|JSON|Object|Array|String|Number|Promise|require|res|req|db|eval|Buffer|process|import|sqlite3|os';
+  const re = new RegExp(
+    '(\\/\\/[^\\n]*|\\/\\*[\\s\\S]*?\\*\\/|#[^\\n]*)' +
+    '|(`(?:[^`\\\\]|\\\\.)*`|"(?:[^"\\\\]|\\\\.)*"|\'(?:[^\'\\\\]|\\\\.)*\')' +
+    '|\\b(' + kw + ')\\b' +
+    '|\\b(\\d+(?:\\.\\d+)?)\\b' +
+    '|\\b(' + bi + ')\\b' +
+    '|\\b([a-zA-Z_$][\\w$]*)(?=\\s*\\()', 'g');
+  const cls = ['tok-comment','tok-string','tok-keyword','tok-number','tok-builtin','tok-func'];
+  return esc.replace(re, (m,...g) => {
+    g = g.slice(0,6);
+    const i = g.findIndex(x => x !== undefined);
+    return i >= 0 ? `<span class="${cls[i]}">${m}</span>` : m;
+  });
+}
+
+function renderCode(code){
+  const lines = code.split('\n');
+  const problemLines = new Set(state.defects.map(d => d.line));
+  const wrap = document.getElementById('codePreview');
+  wrap.innerHTML = lines.map((ln, i) => {
+    const no = i + 1;
+    const isProblem = problemLines.has(no);
+    const hl = ln ? highlightLine(ln) : '&nbsp;';
+    return `<div class="code-row ${isProblem ? 'problem' : ''}" data-line="${no}">
+      <span class="gutter">${isProblem ? '<span class="inline-block w-1.5 h-1.5 rounded-full mr-1" style="background:var(--high)"></span>' : ''}${no}</span>
+      <pre>${hl}</pre>
+    </div>`;
+  }).join('');
+}
+
+function locateLine(line){
+  const row = document.querySelector(`.code-row[data-line="${line}"]`);
+  if (!row) return;
+  row.scrollIntoView({ behavior:'smooth', block:'center' });
+  row.classList.remove('flash');
+  void row.offsetWidth;
+  row.classList.add('flash');
+}
+
+/* ================= 风险筛选 ================= */
+function applyRiskFilter(){
+  const filter = document.getElementById('riskSelect').value;
+  state.risk = filter;
+  document.querySelectorAll('#defectList .defect-item').forEach(item => {
+    item.style.display = (filter === 'all' || item.dataset.level === filter) ? '' : 'none';
+  });
+}
+
+/* ================= 导出（模拟 + 真实下载） ================= */
+function exportReport(kind){
+  const defs = state.defects || [];
+  const lvText = { high:'高危', mid:'中危', low:'低危' };
+  const counts = { high:defs.filter(d=>d.level==='high').length, mid:defs.filter(d=>d.level==='mid').length, low:defs.filter(d=>d.level==='low').length };
+  const now = new Date().toLocaleString('zh-CN');
+
+  if (kind === 'markdown'){
+    let md = `# 智能代码审查报告\n\n> 生成时间：${now}  |  缺陷总数：${defs.length}（高危 ${counts.high} / 中危 ${counts.mid} / 低危 ${counts.low}）\n\n`;
+    defs.forEach(d => {
+      md += `## [${lvText[d.level]}] ${d.title}\n- **位置**：第 ${d.line} 行\n- **类型**：${d.cat}\n- **描述**：${d.desc}\n- **修复建议**：${d.fix}\n\n`;
+    });
+    downloadFile('code-review-report.md', md, 'text/markdown');
+  } else {
+    let html = `<!DOCTYPE html><html><head><meta charset="UTF-8"><title>代码审查报告</title></head><body style="font-family:sans-serif;max-width:760px;margin:40px auto;color:#1a1d24">
+      <h1>智能代码审查报告</h1><p>生成时间：${now} ｜ 缺陷总数：${defs.length}</p><hr>`;
+    defs.forEach(d => {
+      html += `<div style="border:1px solid #e7e9ee;border-radius:12px;padding:16px;margin:12px 0">
+        <strong>[${lvText[d.level]}] ${d.title}</strong> <em style="color:#666">第 ${d.line} 行 · ${d.cat}</em>
+        <p>${d.desc}</p><p><b>修复建议：</b>${d.fix}</p></div>`;
+    });
+    html += '</body></html>';
+    downloadFile('code-review-report.html', html, 'text/html');
+  }
+  toast('报告导出成功，已开始下载', 'success');
+}
+
+function downloadFile(name, content, mime){
+  const blob = new Blob([content], { type: mime + ';charset=utf-8' });
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(blob);
+  a.download = name;
+  a.click();
+  URL.revokeObjectURL(a.href);
+}
+
+/* ================= 通用 ================= */
+function resetReview(){
+  const btn = document.getElementById('startBtn');
+  btn.disabled = false;
+  btn.innerHTML = '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M13 2 3 14h7l-1 8 10-12h-7l1-8Z"/></svg> 开始审查';
+  state.fileCode = null; state.fileName = '';
+  document.getElementById('dropzoneText').innerHTML = '点击或拖拽上传单个代码文件';
+  document.getElementById('gitUrl').value = '';
+  state.sample = getSample(state.lang);
+  document.getElementById('codeText').value = state.sample.code;
+
+  document.getElementById('introSection').classList.remove('hidden');
+  document.getElementById('inputSection').classList.remove('hidden');
+  document.getElementById('scanSection').classList.add('hidden');
+  document.getElementById('resultSection').classList.add('hidden');
+  window.scrollTo({ top:0, behavior:'smooth' });
+}
+
+function shake(el){
+  el.animate([{transform:'translateX(0)'},{transform:'translateX(-6px)'},{transform:'translateX(6px)'},{transform:'translateX(-4px)'},{transform:'translateX(4px)'},{transform:'translateX(0)'}], { duration:360 });
+}
+
+function toast(msg, type){
+  const colors = { success:'#16a34a', warn:'#f59e0b', info:'#2f6bff' };
+  const box = document.createElement('div');
+  box.textContent = msg;
+  box.style.cssText = `position:fixed;bottom:24px;left:50%;transform:translateX(-50%);z-index:100;
+    background:#1a1d24;color:#fff;padding:11px 20px;border-radius:12px;font-size:13px;font-weight:500;
+    box-shadow:0 8px 30px rgba(0,0,0,.25);opacity:0;transition:opacity .3s, transform .3s;border-left:4px solid ${colors[type]||'#2f6bff'};`;
+  document.body.appendChild(box);
+  requestAnimationFrame(() => { box.style.opacity = '1'; box.style.transform = 'translateX(-50%) translateY(-4px)'; });
+  setTimeout(() => { box.style.opacity = '0'; box.style.transform = 'translateX(-50%) translateY(0)'; setTimeout(()=>box.remove(), 300); }, 2200);
+}
+
+/* ================= 初始化 ================= */
+function init(){
+  state.sample = getSample('javascript');
+  document.getElementById('codeText').value = state.sample.code;
+}
+init();
+</script>
+</body>
+</html>

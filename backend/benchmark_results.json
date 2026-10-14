@@ -1,0 +1,25 @@
+{
+  "tolerance": 2,
+  "samples": 6,
+  "total_truth": 36,
+  "modes": {
+    "semgrep": {
+      "tp": 15,
+      "fp": 0,
+      "fn": 21,
+      "truth": 36
+    },
+    "llm": {
+      "tp": 29,
+      "fp": 10,
+      "fn": 7,
+      "truth": 36
+    },
+    "fusion": {
+      "tp": 36,
+      "fp": 13,
+      "fn": 0,
+      "truth": 36
+    }
+  }
+}

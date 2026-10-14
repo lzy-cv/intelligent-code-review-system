@@ -1,0 +1,87 @@
+# Local demo ruleset: covers common security defects (offline, deterministic, fast)
+rules:
+  # 1. Hardcoded secret
+  - id: demo.hardcoded-secret
+    languages: [javascript, typescript, python]
+    message: Hardcoded secret detected. Secrets committed to source control are considered leaked.
+    severity: ERROR
+    metadata:
+      category: security
+      cwe: "CWE-798"
+    pattern-regex: '(?i)(key|secret|password|token)\w*\s*=\s*["''][^"''\n]{16,}["'']'
+
+  # 2. SQL injection (Python string concatenation)
+  - id: demo.sql-injection
+    languages: [python]
+    message: SQL statement built via string concatenation is vulnerable to SQL injection.
+    severity: ERROR
+    metadata:
+      category: security
+      cwe: "CWE-89"
+    patterns:
+      - pattern: |
+          $Q = $STR + $VAR + ...
+      - metavariable-regex:
+          metavariable: $Q
+          regex: (?i)(query|sql|stmt|statement)
+
+  # 3. SQL injection (JS template string)
+  - id: demo.sql-injection-js
+    languages: [javascript, typescript]
+    message: SQL statement built via template string interpolation is vulnerable to SQL injection.
+    severity: ERROR
+    metadata:
+      category: security
+      cwe: "CWE-89"
+    pattern-regex: '`[^`]*?(SELECT|INSERT|UPDATE|DELETE)[^`]*?\$\{'
+
+  # 4. eval dangerous function
+  - id: demo.eval
+    languages: [javascript, typescript]
+    message: eval() executes a user-controlled string, equivalent to remote code execution.
+    severity: ERROR
+    metadata:
+      category: security
+      cwe: "CWE-95"
+    pattern: eval(...)
+
+  # 5. innerHTML XSS
+  - id: demo.innerHTML-xss
+    languages: [javascript, typescript]
+    message: Untrusted content assigned to innerHTML is vulnerable to XSS.
+    severity: ERROR
+    metadata:
+      category: security
+      cwe: "CWE-79"
+    pattern: $X.innerHTML = $Y
+
+  # 6. Cookie missing httpOnly
+  - id: demo.cookie-httponly
+    languages: [javascript, typescript]
+    message: Cookie missing the httpOnly attribute can be read by scripts after XSS.
+    severity: WARNING
+    metadata:
+      category: security
+      cwe: "CWE-1004"
+    pattern: |
+      { httpOnly: false }
+
+  # 7. var declaration
+  - id: demo.var-declaration
+    languages: [javascript, typescript]
+    message: Use of var introduces hoisting and function-scope issues.
+    severity: INFO
+    metadata:
+      category: code-quality
+    pattern-regex: '\bvar\s+[A-Za-z_$][\w$]*\s*='
+
+  # 8. Leftover debug logging
+  - id: demo.debug-log
+    languages: [javascript, typescript, python]
+    message: Leftover debug logging may leak internal data and hurt performance.
+    severity: INFO
+    metadata:
+      category: code-quality
+    pattern-either:
+      - pattern: console.log(...)
+      - pattern: print(...)
