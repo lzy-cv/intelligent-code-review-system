@@ -7,6 +7,10 @@ from .llm_analyzer import analyze as llm_analyze
 _SEV_ORDER = {"high": 0, "mid": 1, "low": 2}
 
 
+# LLM 缺陷置信度阈值：低于该值视为不可靠，过滤以降低误报
+CONFIDENCE_THRESHOLD = 0.7
+
+
 def _merge(rule_defects: list[dict], llm_defects: list[dict]) -> list[dict]:
     merged, seen = [], set()
     for d in rule_defects:
@@ -15,9 +19,15 @@ def _merge(rule_defects: list[dict], llm_defects: list[dict]) -> list[dict]:
         merged.append(d)
         seen.add((d["line"], d["title"]))
     for d in llm_defects:
+        # 置信度过滤：低置信度视为幻觉，丢弃以降低误报
+        if d.get("confidence", 0.5) < CONFIDENCE_THRESHOLD:
+            continue
         if (d["line"], d["title"]) in seen:
             continue
         merged.append(d)
+    # 去掉内部字段，保持输出结构不变
+    for d in merged:
+        d.pop("confidence", None)
     merged.sort(key=lambda d: (d["line"], _SEV_ORDER.get(d["level"], 9)))
     return merged
 

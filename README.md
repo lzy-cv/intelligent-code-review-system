@@ -4,12 +4,36 @@
 
 ## 系统架构
 
-审查流水线（`backend/app/engine/`）：
+```mermaid
+flowchart LR
+    subgraph 前端
+        FE["Vue3 + TypeScript<br/>工作台 / 历史 / 报告"]
+    end
+    subgraph 后端 FastAPI
+        API["POST /api/review"]
+        RULE["① Semgrep 规则引擎<br/>确定性漏洞扫描"]
+        RAG["② RAG 检索<br/>CWE 案例库 TF-IDF"]
+        LLM["③ LLM 深度分析<br/>DeepSeek 语义审查"]
+        MERGE["④ 融合去重<br/>来源标注 + 置信度过滤"]
+        DB[("SQLite<br/>用户/审查/缺陷/日志")]
+    end
+    FE -->|提交代码| API
+    API --> RULE
+    API --> RAG
+    API --> LLM
+    RULE --> MERGE
+    RAG -->|参考案例| LLM
+    LLM --> MERGE
+    MERGE --> DB
+    MERGE -->|缺陷报告| FE
+```
+
+### 审查流水线
 
 1. **Semgrep 规则引擎**：确定性漏洞扫描（SQL 注入 / XSS / 硬编码密钥 / eval 等）
 2. **RAG 检索增强**：内置 13 类 CWE 缺陷案例库，TF-IDF + 余弦相似度检索，为缺陷附上参考修复代码
-3. **LLM 深度分析**：DeepSeek（OpenAI 兼容）做语义级分析，找出规则无法覆盖的逻辑缺陷
-4. **融合去重**：规则 + LLM 结果合并，每条缺陷标注来源（规则 / LLM）
+3. **LLM 深度分析**：DeepSeek（OpenAI 兼容）做语义级分析，找出规则无法覆盖的逻辑缺陷；带置信度评分与重试降级
+4. **融合去重**：规则 + LLM 结果合并，每条缺陷标注来源（规则 / LLM），低置信度 LLM 缺陷自动过滤
 
 ## 目录结构
 
@@ -45,7 +69,17 @@ npm run dev                 # 启动 http://localhost:5173
 
 `backend/benchmark.py` 对比三种模式（Semgrep 单独 / LLM 单独 / 三引擎融合）的检出率、准确率、误报率。
 
-> 在 6 个样本、36 处标注缺陷上：**融合方案检出率 100%（0 漏报）**，由纯规则引擎的 41.7% 提升而来。
+> 在 6 个样本、36 处标注缺陷上：**融合方案检出率 100%（0 漏报）**，由纯规则引擎的 41.7% 提升而来；LLM 单独检出率 80.6%。
+>
+> 融合方案另内置**置信度过滤**（对 LLM 缺陷按 confidence 阈值过滤）以控制误报，可用 `python backend/benchmark.py` 复现评测。
+
+## 界面截图
+
+> 运行系统后可将截图放入 `docs/` 目录，替换下方占位引用：
+
+| 登录页 | 审查工作台 | 审查结果 |
+|:---:|:---:|:---:|
+| ![登录页](docs/login.png) | ![工作台](docs/workspace.png) | ![结果](docs/result.png) |
 
 ## 技术栈
 

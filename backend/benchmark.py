@@ -224,6 +224,8 @@ def main():
     for s in SAMPLES:
         for m in modes:
             defects = run_mode(s, m)
+            if m in ("llm", "fusion"):
+                time.sleep(3)  # 避免连续调用触发限流
             tp, fp, fn, recall, precision = evaluate(defects, s["truth"])
             agg[m]["tp"] += tp
             agg[m]["fp"] += fp
