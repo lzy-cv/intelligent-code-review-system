@@ -1,4 +1,5 @@
 """审查流水线：规则引擎(Semgrep) → RAG 增强 → LLM 深度分析 → 融合去重"""
+import re
 import time
 
 from . import semgrep, rag
@@ -10,21 +11,56 @@ _SEV_ORDER = {"high": 0, "mid": 1, "low": 2}
 # LLM 缺陷置信度阈值：低于该值视为不可靠，过滤以降低误报
 CONFIDENCE_THRESHOLD = 0.7
 
+# 标题归一化：去掉空格、标点与常见修饰词，避免「SQL 注入风险」与「SQL注入」
+# 因表述差异被当成两个缺陷重复上报（直接推高误报率）
+_TITLE_PUNCT = re.compile(r"[\s\-_·、，,。.;；:：()（）\[\]【】'\"“”]")
+_TITLE_NOISE = ("风险", "漏洞", "问题", "攻击", "隐患", "检测", "存在")
 
-def _merge(rule_defects: list[dict], llm_defects: list[dict]) -> list[dict]:
-    merged, seen = [], set()
+
+def _norm_title(title: str) -> str:
+    t = _TITLE_PUNCT.sub("", str(title)).lower()
+    for w in _TITLE_NOISE:
+        t = t.replace(w, "")
+    return t
+
+
+def _is_same_issue(line: int, title: str, seen: list[tuple[int, str]]) -> bool:
+    """同一行且归一化标题相同或互相包含 → 视为同一缺陷。"""
+    if not title:
+        return False
+    for sline, stitle in seen:
+        if sline != line or not stitle:
+            continue
+        if title == stitle or title in stitle or stitle in title:
+            return True
+    return False
+
+
+def _merge(
+    rule_defects: list[dict],
+    llm_defects: list[dict],
+    threshold: float = CONFIDENCE_THRESHOLD,
+) -> list[dict]:
+    """融合规则缺陷与 LLM 缺陷。
+
+    threshold 单独暴露出来，供 benchmark.py 的阈值敏感性实验重放不同取值。
+    """
+    merged, seen = [], []
     for d in rule_defects:
         d = dict(d)
         d.setdefault("source", "rule")
         merged.append(d)
-        seen.add((d["line"], d["title"]))
+        seen.append((d["line"], _norm_title(d["title"])))
     for d in llm_defects:
         # 置信度过滤：低置信度视为幻觉，丢弃以降低误报
-        if d.get("confidence", 0.5) < CONFIDENCE_THRESHOLD:
+        if d.get("confidence", 0.5) < threshold:
             continue
-        if (d["line"], d["title"]) in seen:
+        title = _norm_title(d["title"])
+        if _is_same_issue(d["line"], title, seen):
             continue
+        d = dict(d)  # 复制后再剔除内部字段，避免污染调用方数据
         merged.append(d)
+        seen.append((d["line"], title))
     # 去掉内部字段，保持输出结构不变
     for d in merged:
         d.pop("confidence", None)

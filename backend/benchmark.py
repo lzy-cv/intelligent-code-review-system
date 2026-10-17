@@ -6,7 +6,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
-from app.engine import semgrep, pipeline  # noqa: E402
+from app.engine import semgrep, pipeline, rag  # noqa: E402
 from app.engine.llm_analyzer import analyze as llm_analyze  # noqa: E402
 
 TOL = 2  # 行号匹配容差（±2 行）
@@ -257,5 +257,89 @@ def main():
     print("\n结果已保存到 benchmark_results.json")
 
 
+SWEEP_THRESHOLDS = [round(0.3 + i * 0.1, 1) for i in range(7)]  # 0.3 ~ 0.9
+
+
+def run_raw(sample):
+    """跑一次流水线，但保留 LLM 原始结果（含 confidence）。
+
+    LLM 每个样本只调用一次，阈值过滤在本地重放——这样扫描时唯一的变量就是阈值，
+    既避免重复的付费调用，也避免外部服务波动污染实验结论。
+    """
+    code, lang = sample["code"], sample["lang"]
+    rule_defects, _, _, _ = semgrep.run_review(code, lang)
+    rag.enhance(rule_defects)
+    rag_cases = rag.cases_for_llm(rule_defects)
+    llm_defects, llm_used = llm_analyze(code, lang, rule_defects, rag_cases)
+    return rule_defects, llm_defects, llm_used
+
+
+def sweep():
+    """阈值敏感性实验：固定 LLM 输出，扫描置信度阈值，观察 P/R/F1 变化。"""
+    thresholds = SWEEP_THRESHOLDS
+    print(f"阈值敏感性实验：三引擎融合，扫描置信度阈值 {thresholds[0]} ~ {thresholds[-1]}")
+    print("LLM 每个样本只调用一次，阈值过滤在本地重放\n")
+
+    raw, llm_fail = [], 0
+    for s in SAMPLES:
+        rule_defects, llm_defects, llm_used = run_raw(s)
+        if not llm_used:
+            llm_fail += 1
+        raw.append((s, rule_defects, llm_defects))
+        print(f"  {s['name']:<14} 规则 {len(rule_defects):>2} 条 | "
+              f"LLM {len(llm_defects):>2} 条 [{'OK' if llm_used else '失败'}]")
+        time.sleep(3)
+
+    if llm_fail:
+        print(f"\n⚠ {llm_fail}/{len(SAMPLES)} 个样本的 LLM 调用失败，本次结果仅供参考")
+
+    agg = {t: {"tp": 0, "fp": 0, "fn": 0, "truth": 0} for t in thresholds}
+    for s, rule_defects, llm_defects in raw:
+        for t in thresholds:
+            defects = pipeline._merge(rule_defects, llm_defects, t)
+            tp, fp, fn, _, _ = evaluate(defects, s["truth"])
+            a = agg[t]
+            a["tp"] += tp
+            a["fp"] += fp
+            a["fn"] += fn
+            a["truth"] += len(s["truth"])
+
+    print("\n" + "=" * 80)
+    print(f"{'阈值':<8}{'报告数':>6}{'命中':>6}{'漏报':>6}{'误报':>6}"
+          f"{'检出率':>9}{'准确率':>9}{'误报率':>9}{'F1':>8}")
+    print("-" * 80)
+    best_t, best_f1 = None, -1.0
+    for t in thresholds:
+        a = agg[t]
+        tp, fp, fn, truth = a["tp"], a["fp"], a["fn"], a["truth"]
+        reported = tp + fp
+        recall = tp / truth if truth else 0.0
+        precision = tp / reported if reported else 0.0
+        f1 = 2 * precision * recall / (precision + recall) if precision + recall else 0.0
+        print(f"{t:<8.1f}{reported:>6}{tp:>6}{fn:>6}{fp:>6}"
+              f"{recall*100:>8.1f}%{precision*100:>8.1f}%{(1-precision)*100:>8.1f}%{f1*100:>7.1f}%")
+        if f1 > best_f1:
+            best_t, best_f1 = t, f1
+    print("=" * 80)
+    print(f"F1 最优点：阈值 {best_t:.1f}（F1={best_f1*100:.1f}%）")
+
+    Path("benchmark_sweep.json").write_text(json.dumps({
+        "samples": len(SAMPLES),
+        "total_truth": sum(len(s["truth"]) for s in SAMPLES),
+        "llm_failures": llm_fail,
+        "best_threshold": best_t,
+        "thresholds": {
+            f"{t:.1f}": {
+                "tp": agg[t]["tp"], "fp": agg[t]["fp"],
+                "fn": agg[t]["fn"], "truth": agg[t]["truth"],
+            } for t in thresholds
+        },
+    }, ensure_ascii=False, indent=2), encoding="utf-8")
+    print("\n结果已保存到 benchmark_sweep.json")
+
+
 if __name__ == "__main__":
-    main()
+    if "--sweep" in sys.argv:
+        sweep()
+    else:
+        main()

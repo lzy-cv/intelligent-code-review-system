@@ -40,8 +40,11 @@ tok = r["token"]
 # 4. 新用户提交审查
 code = open("smoke/test.js", encoding="utf-8").read()
 s, r = call("POST", "/api/review", {"code": code, "language": "javascript", "ruleset": "local", "file_name": "test.js"}, token=tok)
-print(f"4. 审查 -> {s} | summary={r.get('summary')} | review_id={r.get('review_id')}")
-assert s == 200 and r["summary"]["total"] == 7
+rule_n = sum(1 for d in r.get("defects", []) if d.get("source") == "rule")
+print(f"4. 审查 -> {s} | summary={r.get('summary')} | 规则命中={rule_n} | llm_used={r.get('llm_used')}")
+# 规则引擎结果确定（7 处）；LLM 是否启用、产出多少条不固定，故只校验规则部分
+assert s == 200 and rule_n == 7
+assert r["summary"]["total"] >= 7
 rid = r["review_id"]
 
 # 5. 新用户的历史（应只含自己那条）
@@ -52,7 +55,7 @@ assert s == 200 and len(r) == 1
 # 6. 详情
 s, r = call("GET", f"/api/reviews/{rid}", token=tok)
 print(f"6. 详情 -> {s} | 缺陷数={len(r['defects'])}")
-assert s == 200 and len(r["defects"]) == 7
+assert s == 200 and len(r["defects"]) == r["total"]
 
 # 7. 操作日志
 s, r = call("GET", "/api/logs", token=tok)

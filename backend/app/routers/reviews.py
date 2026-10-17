@@ -1,15 +1,23 @@
+import os
+
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session
 
 from ..database import get_db
 from .. import models, auth
 from ..engine import pipeline, semgrep
+from ..ratelimit import SlidingWindowLimiter
 from ..schemas import (
     ReviewRequest, ReviewResponse, ReviewListItem, ReviewDetail,
     Defect, Summary, AuditLogItem,
 )
 
 router = APIRouter(prefix="/api", tags=["reviews"])
+
+# 审查接口按用户限流：每次审查会触发付费的 LLM 调用，必须防止被刷
+_REVIEW_MAX = int(os.environ.get("REVIEW_RATE_LIMIT", "10"))
+_REVIEW_WINDOW = int(os.environ.get("REVIEW_RATE_WINDOW", "60"))
+_review_limiter = SlidingWindowLimiter(_REVIEW_MAX, _REVIEW_WINDOW)
 
 
 def _defect_out(d: models.Defect) -> Defect:
@@ -28,6 +36,14 @@ def review(
 ):
     if not req.code.strip():
         raise HTTPException(400, "代码不能为空")
+
+    wait = _review_limiter.check(str(user.id))
+    if wait is not None:
+        raise HTTPException(
+            429,
+            f"审查过于频繁，请 {wait} 秒后再试",
+            headers={"Retry-After": str(wait)},
+        )
 
     try:
         defects, counts, duration, raw, llm_used = pipeline.run_review(req.code, req.language, req.ruleset)
