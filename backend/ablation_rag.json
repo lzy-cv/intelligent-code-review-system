@@ -1,0 +1,31 @@
+{
+  "samples": 6,
+  "tolerance": 2,
+  "enhancement": {
+    "total": 15,
+    "with_cwe": 15,
+    "with_code": 15
+  },
+  "norag": {
+    "defects": 51,
+    "fix_chars": 2845,
+    "llm_defects": 36,
+    "llm_fix_chars": 2375,
+    "matched": 34,
+    "specific": 22,
+    "llm_matched": 24,
+    "llm_specific": 15,
+    "fail": 0
+  },
+  "full": {
+    "defects": 48,
+    "fix_chars": 2895,
+    "llm_defects": 33,
+    "llm_fix_chars": 2425,
+    "matched": 36,
+    "specific": 23,
+    "llm_matched": 25,
+    "llm_specific": 16,
+    "fail": 0
+  }
+}
